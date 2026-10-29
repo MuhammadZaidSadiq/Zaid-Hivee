@@ -1,0 +1,68 @@
+pipeline {
+    agent any
+
+    environment {
+        BACKEND_IMAGE  = "bookhive-backend:v${BUILD_NUMBER}"
+        FRONTEND_IMAGE = "bookhive-frontend:v${BUILD_NUMBER}"
+    }
+
+    stages {
+        stage('Build Images') {
+            steps {
+                echo 'Building backend and frontend Docker images...'
+                sh '''
+                docker build -t $BACKEND_IMAGE ./backend
+                docker build -f Dockerfile.frontend -t $FRONTEND_IMAGE .
+                '''
+            }
+        }
+
+        stage('Test') {
+            steps {
+                echo 'Checking PHP syntax...'
+                sh '''
+                docker run --rm $BACKEND_IMAGE sh -c 'for f in /var/www/html/*.php; do php -l "$f" || exit 1; done'
+                '''
+            }
+        }
+
+        stage('Load Images into Minikube') {
+            steps {
+                sh '''
+                sudo -H -u ubuntu minikube image load $BACKEND_IMAGE
+                sudo -H -u ubuntu minikube image load $FRONTEND_IMAGE
+                '''
+            }
+        }
+
+        stage('Deploy to Kubernetes') {
+            steps {
+                sh '''
+                sed -e "s#BACKEND_IMAGE_PLACEHOLDER#$BACKEND_IMAGE#" -e "s#FRONTEND_IMAGE_PLACEHOLDER#$FRONTEND_IMAGE#" k8s/bookhive.yaml > k8s/deploy.yaml
+                sudo -H -u ubuntu kubectl apply -f $WORKSPACE/k8s/deploy.yaml
+                sudo -H -u ubuntu kubectl rollout status deployment/db --timeout=180s
+                sudo -H -u ubuntu kubectl rollout status deployment/backend --timeout=180s
+                sudo -H -u ubuntu kubectl rollout status deployment/frontend --timeout=180s
+                sudo -H -u ubuntu kubectl get pods -o wide
+                '''
+            }
+        }
+
+        stage('Verify') {
+            steps {
+                sh '''
+                IP=$(sudo -H -u ubuntu minikube ip)
+                for i in $(seq 1 24); do
+                  if curl -s http://$IP:30080/login.php | grep -q "Welcome back"; then
+                    echo "BookHive is running inside Kubernetes pods!"
+                    exit 0
+                  fi
+                  echo "Waiting for the app..."
+                  sleep 5
+                done
+                exit 1
+                '''
+            }
+        }
+    }
+}

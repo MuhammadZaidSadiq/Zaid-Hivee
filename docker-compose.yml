@@ -1,0 +1,43 @@
+services:
+
+  # ===== FRONTEND TIER (Nginx) =====
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    image: bookhive-frontend:latest
+    container_name: bookhive_frontend
+    ports:
+      - "80:80"
+    volumes:
+      - uploads_vol:/var/www/html/uploads
+    depends_on:
+      - backend
+    restart: always
+
+  # ===== BACKEND TIER (PHP-FPM) =====
+  backend:
+    build: ./backend
+    image: bookhive-backend:latest
+    container_name: bookhive_backend
+    volumes:
+      - uploads_vol:/var/www/html/uploads
+    depends_on:
+      - db
+    restart: always
+
+  # ===== DATABASE TIER (MySQL) =====
+  db:
+    image: mysql:5.7
+    container_name: bookhive_db
+    environment:
+      MYSQL_ROOT_PASSWORD: root_password
+      MYSQL_DATABASE: bookhive_db
+    volumes:
+      - db_vol:/var/lib/mysql
+      - ./db-init:/docker-entrypoint-initdb.d
+    restart: always
+
+volumes:
+  uploads_vol:
+  db_vol:
